@@ -107,6 +107,8 @@
     };
   });
 
+  var currentScene = null;
+
   // Set up autorotate, if enabled.
   var autorotate = Marzipano.autorotate({
     yawSpeed: 0.03,
@@ -186,9 +188,79 @@
     stopAutorotate();
     scene.view.setParameters(scene.data.initialViewParameters);
     scene.scene.switchTo();
+    currentScene = scene;
     startAutorotate();
     updateSceneName(scene);
     updateSceneList(scene);
+  }
+
+  function getLayer(scene) {
+    try { return scene.scene._stage._layers[0]; } catch(e) {}
+    return null;
+  }
+
+  function setLayerOpacity(layer, opacity) {
+    if (!layer) { return; }
+    layer._effects = layer._effects || {};
+    layer._effects.opacity = opacity;
+  }
+
+  function switchSceneWalk(targetScene) {
+    stopAutorotate();
+
+    if (!currentScene) {
+      switchScene(targetScene);
+      return;
+    }
+
+    var currentView = currentScene.view;
+    var currentYaw = currentView.yaw();
+    var currentPitch = currentView.pitch();
+    var currentFov = currentView.fov();
+    var targetView = targetScene.view;
+    var targetFov = targetScene.data.initialViewParameters.fov;
+    var layer = getLayer(currentScene);
+    var duration = 700;
+    var switched = false;
+    var startTime = Date.now();
+
+    targetView.setParameters({
+      yaw: currentYaw,
+      pitch: currentPitch,
+      fov: targetFov
+    });
+
+    function step() {
+      var elapsed = Date.now() - startTime;
+      var progress = Math.min(elapsed / duration, 1);
+      var ease = 1 - Math.pow(1 - progress, 3);
+
+      currentView.setParameters({ fov: currentFov * (1 - 0.5 * ease) });
+
+      if (!switched) {
+        setLayerOpacity(layer, 1 - progress * 2);
+        if (progress >= 0.5) {
+          switched = true;
+          setLayerOpacity(layer, 0);
+          setLayerOpacity(getLayer(targetScene), 0);
+          targetScene.scene.switchTo();
+          currentScene = targetScene;
+          layer = getLayer(currentScene);
+        }
+      } else {
+        setLayerOpacity(layer, (progress - 0.5) * 2);
+      }
+
+      if (progress < 1) {
+        requestAnimationFrame(step);
+      } else {
+        setLayerOpacity(layer, 1);
+        startAutorotate();
+        updateSceneName(targetScene);
+        updateSceneList(targetScene);
+      }
+    }
+    step();
   }
 
   function updateSceneName(scene) {
@@ -251,25 +323,18 @@
     wrapper.classList.add('hotspot');
     wrapper.classList.add('link-hotspot');
 
-    // Create image element.
-    var icon = document.createElement('img');
-    icon.src = 'img/link.png';
-    icon.classList.add('link-hotspot-icon');
+    // Create ground marker (ellipse with shadow).
+    var marker = document.createElement('div');
+    marker.classList.add('link-hotspot-marker');
 
-    // Set rotation transform.
-    var transformProperties = [ '-ms-transform', '-webkit-transform', 'transform' ];
-    for (var i = 0; i < transformProperties.length; i++) {
-      var property = transformProperties[i];
-      icon.style[property] = 'rotate(' + hotspot.rotation + 'rad)';
-    }
+    wrapper.appendChild(marker);
 
     // Add click event handler.
     wrapper.addEventListener('click', function() {
-      switchScene(findSceneById(hotspot.target));
+      switchSceneWalk(findSceneById(hotspot.target));
     });
 
     // Prevent touch and scroll events from reaching the parent element.
-    // This prevents the view control logic from interfering with the hotspot.
     stopTouchAndScrollEventPropagation(wrapper);
 
     // Create tooltip element.
@@ -278,10 +343,44 @@
     tooltip.classList.add('link-hotspot-tooltip');
     tooltip.innerHTML = findSceneDataById(hotspot.target).name;
 
-    wrapper.appendChild(icon);
     wrapper.appendChild(tooltip);
 
     return wrapper;
+  }
+
+  function getCategorySVG(title) {
+    var t = title.toLowerCase();
+    if (t.indexOf('banheiro') !== -1) {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18h16v2H4z"/><rect x="6" y="8" width="12" height="10" rx="1"/><circle cx="12" cy="5" r="3"/></svg>';
+    }
+    if (t.indexOf('offee') !== -1 || t.indexOf('cofe') !== -1 || t.indexOf('break') !== -1) {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 7h12v5a4 4 0 01-4 4h-4a4 4 0 01-4-4V7z"/><path d="M4 7h16"/><path d="M18 10h1a2 2 0 010 4h-1"/></svg>';
+    }
+    if (t.indexOf('palco') !== -1) {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
+    }
+    if (t.indexOf('microfone') !== -1 || t.indexOf('áudio') !== -1 || t.indexOf('behringer') !== -1 || t.indexOf('console') !== -1) {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
+    }
+    if (t.indexOf('streaming') !== -1 || t.indexOf('vmix') !== -1 || t.indexOf('atem') !== -1) {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>';
+    }
+    if (t.indexOf('vídeo') !== -1 || t.indexOf('video') !== -1 || t.indexOf('wall') !== -1) {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>';
+    }
+    if (t.indexOf('poltrona') !== -1 || t.indexOf('lugar') !== -1 || t.indexOf('cadeira') !== -1) {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14v8H5z"/><path d="M7 12V6a2 2 0 012-2h6a2 2 0 012 2v6"/></svg>';
+    }
+    if (t.indexOf('banner') !== -1) {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>';
+    }
+    if (t.indexOf('house') !== -1 || t.indexOf('mix') !== -1) {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>';
+    }
+    if (t.indexOf('entrada') !== -1) {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>';
+    }
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
   }
 
   function createInfoHotspotElement(hotspot) {
@@ -295,12 +394,12 @@
     var header = document.createElement('div');
     header.classList.add('info-hotspot-header');
 
-    // Create image element.
+    // Create SVG icon element.
     var iconWrapper = document.createElement('div');
     iconWrapper.classList.add('info-hotspot-icon-wrapper');
-    var icon = document.createElement('img');
-    icon.src = 'img/info.png';
+    var icon = document.createElement('div');
     icon.classList.add('info-hotspot-icon');
+    icon.innerHTML = getCategorySVG(hotspot.title);
     iconWrapper.appendChild(icon);
 
     // Create title element.
